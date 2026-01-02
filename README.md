@@ -1,3 +1,4 @@
+
 # Todo App Evolution - Hackathon II
 
 A spec-driven development project transforming a simple console app into a cloud-native AI-powered system.
@@ -128,3 +129,4 @@ MIT License - See LICENSE file for details.
 ## Contributing
 
 This is a hackathon project demonstrating spec-driven development with AI. Contributions should follow the spec-first approach documented in [CLAUDE.md](CLAUDE.md).
+
