@@ -1,26 +1,14 @@
-"""JWT validation using JWKS from Better Auth."""
+"""JWT validation using shared secret from Better Auth."""
 
 from dataclasses import dataclass
-from functools import lru_cache
 
 import jwt
-from jwt import PyJWKClient
 from fastapi import HTTPException, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from ..config import settings
 
 security = HTTPBearer()
-
-
-@lru_cache
-def _get_jwks_client() -> PyJWKClient:
-    """Lazily create JWKS client on first use."""
-    return PyJWKClient(
-        f"{settings.BETTER_AUTH_URL}/api/auth/jwks",
-        cache_keys=True,
-        lifespan=3600,
-    )
 
 
 @dataclass
@@ -33,20 +21,17 @@ class CurrentUser:
 
 def decode_jwt(token: str) -> dict:
     """
-    Decode and validate JWT using JWKS from Better Auth.
+    Decode and validate JWT using shared secret (HS256).
 
     Raises:
         HTTPException(401): If token is invalid
     """
     try:
-        jwks_client = _get_jwks_client()
-        signing_key = jwks_client.get_signing_key_from_jwt(token)
         payload = jwt.decode(
             token,
-            signing_key.key,
-            algorithms=["EdDSA", "ES256", "RS256"],
-            audience=settings.BETTER_AUTH_URL,
-            issuer=settings.BETTER_AUTH_URL,
+            settings.BETTER_AUTH_SECRET,
+            algorithms=["HS256"],
+            options={"verify_aud": False, "verify_iss": False},
         )
         return payload
 

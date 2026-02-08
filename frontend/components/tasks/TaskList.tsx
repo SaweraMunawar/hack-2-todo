@@ -30,18 +30,10 @@ export function TaskList() {
     return () => clearTimeout(timer);
   }, [filters.search]);
 
-  const apiFilters = useMemo(
-    () => ({
-      ...filters,
-      search: debouncedSearch,
-    }),
-    [filters, debouncedSearch]
-  );
-
-  const loadTasks = useCallback(async () => {
+  const loadTasks = useCallback(async (filterParams: TaskFilterParams) => {
     try {
       setIsLoading(true);
-      const response = await getTasks(apiFilters);
+      const response = await getTasks(filterParams);
       setTasks(response.tasks);
       setTotal(response.total);
       setPendingCount(response.pending_count);
@@ -51,22 +43,32 @@ export function TaskList() {
     } finally {
       setIsLoading(false);
     }
-  }, [apiFilters]);
+  }, []);
 
+  // Load tasks when filters or debounced search changes
   useEffect(() => {
-    loadTasks();
-  }, [loadTasks]);
+    const apiFilters = {
+      ...filters,
+      search: debouncedSearch,
+    };
+    loadTasks(apiFilters);
+  }, [filters, debouncedSearch, loadTasks]);
 
   const handleFilterChange = (newFilters: Partial<TaskFilterParams>) => {
     setFilters((prev) => ({ ...prev, ...newFilters }));
   };
+
+  const refreshTasks = useCallback(() => {
+    const apiFilters = { ...filters, search: debouncedSearch };
+    loadTasks(apiFilters);
+  }, [filters, debouncedSearch, loadTasks]);
 
   const handleToggle = async (id: string) => {
     try {
       const updated = await toggleTask(id);
       setTasks(tasks.map((t) => (t.id === id ? updated : t)));
       // Reload to get accurate counts
-      loadTasks();
+      refreshTasks();
     } catch {
       setError("Failed to update task");
     }
@@ -79,7 +81,7 @@ export function TaskList() {
       await deleteTask(id);
       setTasks(tasks.filter((t) => t.id !== id));
       // Reload to get accurate counts
-      loadTasks();
+      refreshTasks();
     } catch {
       setError("Failed to delete task");
     }
@@ -146,7 +148,7 @@ export function TaskList() {
             setIsCreating(false);
             setEditingTask(null);
           }}
-          onSaved={loadTasks}
+          onSaved={refreshTasks}
         />
       )}
     </div>
