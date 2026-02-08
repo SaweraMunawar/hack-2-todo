@@ -41,6 +41,17 @@ app.include_router(tasks.router)
 app.include_router(chat.router)
 
 
+@app.get("/")
+async def root():
+    """Root endpoint for API info."""
+    return {
+        "name": "Todo API",
+        "version": "1.0.0",
+        "docs": "/docs",
+        "health": "/api/v1/health",
+    }
+
+
 @app.get("/api/v1/health")
 async def health_check():
     """Health check endpoint."""
