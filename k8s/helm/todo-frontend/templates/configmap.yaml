@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "todo-frontend.fullname" . }}-config
+  labels:
+    {{- include "todo-frontend.labels" . | nindent 4 }}
+data:
+  app-url: {{ .Values.config.appUrl | quote }}
+  api-url: {{ .Values.config.apiUrl | quote }}

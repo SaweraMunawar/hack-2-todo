@@ -1,0 +1,79 @@
+# Default values for todo-frontend
+# This is a YAML-formatted file.
+
+replicaCount: 1
+
+image:
+  repository: todo-frontend
+  tag: latest
+  pullPolicy: IfNotPresent
+
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  type: NodePort
+  port: 3000
+  targetPort: 3000
+  nodePort: 30000
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 256Mi
+
+# Application configuration (non-sensitive)
+config:
+  appUrl: "http://localhost:30000"
+  apiUrl: "http://todo-backend:8000/api/v1"
+
+# Reference to external secrets (created via kubectl)
+externalSecrets:
+  name: todo-secrets
+  keys:
+    databaseUrl: database-url
+    betterAuthSecret: better-auth-secret
+
+# Health check configuration
+livenessProbe:
+  enabled: true
+  path: /
+  initialDelaySeconds: 15
+  periodSeconds: 30
+  timeoutSeconds: 10
+  failureThreshold: 3
+
+readinessProbe:
+  enabled: true
+  path: /
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+# Pod security context
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  runAsGroup: 1001
+  fsGroup: 1001
+
+# Container security context
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop:
+      - ALL
+
+# Node selector (optional)
+nodeSelector: {}
+
+# Tolerations (optional)
+tolerations: []
+
+# Affinity (optional)
+affinity: {}

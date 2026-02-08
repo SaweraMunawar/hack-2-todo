@@ -1,0 +1,195 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "specs/**"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Deployment environment"
+        required: true
+        default: "staging"
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  REGISTRY: ghcr.io
+  BACKEND_IMAGE: ghcr.io/${{ github.repository }}/todo-backend
+  FRONTEND_IMAGE: ghcr.io/${{ github.repository }}/todo-frontend
+
+jobs:
+  # Build and push images
+  build:
+    name: Build & Push Images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      backend-tag: ${{ steps.meta-backend.outputs.tags }}
+      frontend-tag: ${{ steps.meta-frontend.outputs.tags }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (backend)
+        id: meta-backend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.BACKEND_IMAGE }}
+          tags: |
+            type=sha,prefix=
+            type=ref,event=branch
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Extract metadata (frontend)
+        id: meta-frontend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.FRONTEND_IMAGE }}
+          tags: |
+            type=sha,prefix=
+            type=ref,event=branch
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build and push backend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./k8s/Dockerfile.backend
+          push: true
+          tags: ${{ steps.meta-backend.outputs.tags }}
+          labels: ${{ steps.meta-backend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: ./k8s/Dockerfile.frontend
+          push: true
+          tags: ${{ steps.meta-frontend.outputs.tags }}
+          labels: ${{ steps.meta-frontend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ vars.API_URL || 'http://todo-backend:8000/api/v1' }}
+
+  # Deploy to Kubernetes
+  deploy:
+    name: Deploy to Kubernetes
+    runs-on: ubuntu-latest
+    needs: build
+    environment: ${{ github.event.inputs.environment || 'staging' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.14.0
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: v1.29.0
+
+      - name: Configure kubectl
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Create/Update Secrets
+        run: |
+          kubectl create secret generic todo-secrets \
+            --from-literal=database-url="${{ secrets.DATABASE_URL }}" \
+            --from-literal=better-auth-secret="${{ secrets.BETTER_AUTH_SECRET }}" \
+            --from-literal=openai-api-key="${{ secrets.OPENAI_API_KEY }}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy Backend
+        run: |
+          helm upgrade --install todo-backend k8s/helm/todo-backend \
+            --set image.repository=${{ env.REGISTRY }}/${{ github.repository }}/todo-backend \
+            --set image.tag=${{ github.sha }} \
+            --set config.corsOrigins="${{ vars.CORS_ORIGINS || 'http://localhost:3000' }}" \
+            --wait --timeout 5m
+
+      - name: Deploy Frontend
+        run: |
+          helm upgrade --install todo-frontend k8s/helm/todo-frontend \
+            --set image.repository=${{ env.REGISTRY }}/${{ github.repository }}/todo-frontend \
+            --set image.tag=${{ github.sha }} \
+            --set config.apiUrl="${{ vars.API_URL || 'http://todo-backend:8000/api/v1' }}" \
+            --wait --timeout 5m
+
+      - name: Verify Deployment
+        run: |
+          kubectl rollout status deployment/todo-backend --timeout=3m
+          kubectl rollout status deployment/todo-frontend --timeout=3m
+          echo "Deployment successful!"
+          kubectl get pods -l "app.kubernetes.io/name in (todo-backend, todo-frontend)"
+
+  # Deploy Dapr Components (if enabled)
+  deploy-dapr:
+    name: Deploy Dapr Components
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: ${{ vars.DAPR_ENABLED == 'true' }}
+    environment: ${{ github.event.inputs.environment || 'staging' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: v1.29.0
+
+      - name: Configure kubectl
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Create Kafka Secrets
+        run: |
+          kubectl create secret generic kafka-secrets \
+            --from-literal=brokers="${{ secrets.KAFKA_BROKERS }}" \
+            --from-literal=username="${{ secrets.KAFKA_USERNAME }}" \
+            --from-literal=password="${{ secrets.KAFKA_PASSWORD }}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy Dapr Components
+        run: |
+          # Use cloud config for production
+          kubectl apply -f dapr/components/kafka-pubsub-cloud.yaml
+          kubectl apply -f dapr/components/statestore.yaml
+          kubectl apply -f dapr/components/reminder-cron.yaml
+          kubectl apply -f dapr/components/secrets.yaml
+          kubectl apply -f dapr/config/config.yaml
+          kubectl apply -f dapr/subscriptions/
+
+      - name: Verify Dapr Components
+        run: |
+          kubectl get components
+          kubectl get subscriptions

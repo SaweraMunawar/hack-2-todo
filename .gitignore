@@ -27,6 +27,18 @@ dist/
 build/
 *.egg-info/
 
+# Environment files (contain secrets)
+.env
+.env.local
+.env.production
+!.env.example
+
+# Node.js
+node_modules/
+.next/
+out/
+pnpm-debug.log*
+
 # OS
 .DS_Store
 Thumbs.db

@@ -1,0 +1,13 @@
+apiVersion: v2
+name: todo-frontend
+description: Next.js frontend for Todo AI Chatbot
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - todo
+  - nextjs
+  - frontend
+  - react
+maintainers:
+  - name: Todo Team

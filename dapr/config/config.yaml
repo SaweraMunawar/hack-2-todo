@@ -1,0 +1,45 @@
+apiVersion: dapr.io/v1alpha1
+kind: Configuration
+metadata:
+  name: todo-config
+  namespace: default
+spec:
+  # Tracing configuration
+  tracing:
+    samplingRate: "1"
+    zipkin:
+      endpointAddress: "http://zipkin:9411/api/v2/spans"
+
+  # Mutual TLS for service-to-service communication
+  mtls:
+    enabled: true
+    workloadCertTTL: "24h"
+    allowedClockSkew: "15m"
+
+  # Access control
+  accessControl:
+    defaultAction: allow
+    trustDomain: "todo-app"
+
+  # Metrics
+  metrics:
+    enabled: true
+
+  # API logging
+  api:
+    allowed:
+      - name: state
+        version: v1.0
+        protocol: http
+      - name: publish
+        version: v1.0
+        protocol: http
+      - name: subscribe
+        version: v1.0
+        protocol: http
+      - name: secrets
+        version: v1.0
+        protocol: http
+      - name: invoke
+        version: v1.0
+        protocol: http

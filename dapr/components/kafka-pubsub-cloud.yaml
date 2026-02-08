@@ -1,0 +1,43 @@
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: kafka-pubsub
+  namespace: default
+spec:
+  type: pubsub.kafka
+  version: v1
+  metadata:
+    # Cloud broker (Redpanda Cloud / Confluent)
+    - name: brokers
+      secretKeyRef:
+        name: kafka-secrets
+        key: brokers
+
+    - name: consumerGroup
+      value: "todo-app"
+
+    # SASL Authentication
+    - name: authType
+      value: "sasl"
+    - name: saslMechanism
+      value: "SCRAM-SHA-256"
+    - name: saslUsername
+      secretKeyRef:
+        name: kafka-secrets
+        key: username
+    - name: saslPassword
+      secretKeyRef:
+        name: kafka-secrets
+        key: password
+
+    # TLS enabled for cloud
+    - name: tls
+      value: "true"
+
+    # Consumer settings
+    - name: maxMessageBytes
+      value: "1048576"
+    - name: consumeRetryInterval
+      value: "100ms"
+    - name: initialOffset
+      value: "oldest"

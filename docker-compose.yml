@@ -1,0 +1,143 @@
+version: '3.8'
+
+# Todo AI Chatbot - Complete Docker Deployment
+#
+# BASIC USAGE (without Kafka):
+#   docker compose up --build
+#
+# WITH KAFKA (for event streaming):
+#   docker compose --profile kafka up --build
+#
+# ACCESS:
+#   - Frontend: http://localhost:3000
+#   - Backend API: http://localhost:8000
+#   - Kafka Console: http://localhost:8080 (if --profile kafka)
+
+services:
+  # ============================================
+  # CORE SERVICES
+  # ============================================
+
+  # Backend API (FastAPI)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: ../k8s/Dockerfile.backend
+    container_name: todo-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - CORS_ORIGINS=http://localhost:3000
+      - EVENTS_ENABLED=${EVENTS_ENABLED:-false}
+      - KAFKA_BOOTSTRAP_SERVERS=redpanda:9092
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # Frontend (Next.js)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../k8s/Dockerfile.frontend
+      args:
+        - NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
+    container_name: todo-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
+      - NEXT_PUBLIC_APP_URL=http://localhost:3000
+      - NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ============================================
+  # KAFKA SERVICES (Optional - use --profile kafka)
+  # ============================================
+
+  # Redpanda (Kafka-compatible)
+  redpanda:
+    image: redpandadata/redpanda:latest
+    container_name: redpanda
+    profiles: ["kafka"]
+    command:
+      - redpanda start
+      - --smp 1
+      - --memory 512M
+      - --overprovisioned
+      - --kafka-addr PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr PLAINTEXT://redpanda:9092
+      - --pandaproxy-addr PLAINTEXT://0.0.0.0:8082
+      - --advertise-pandaproxy-addr PLAINTEXT://localhost:8082
+    ports:
+      - "9092:9092"   # Kafka API
+      - "8081:8081"   # Schema Registry
+      - "8082:8082"   # REST Proxy
+      - "9644:9644"   # Admin API
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redpanda Console (Kafka UI)
+  console:
+    image: redpandadata/console:latest
+    container_name: redpanda-console
+    profiles: ["kafka"]
+    entrypoint: /bin/sh
+    command: -c "echo \"$$CONSOLE_CONFIG_FILE\" > /tmp/config.yml && /app/console"
+    environment:
+      CONFIG_FILEPATH: /tmp/config.yml
+      CONSOLE_CONFIG_FILE: |
+        kafka:
+          brokers: ["redpanda:9092"]
+        redpanda:
+          adminApi:
+            enabled: true
+            urls: ["http://redpanda:9644"]
+    ports:
+      - "8080:8080"   # Console UI
+    depends_on:
+      redpanda:
+        condition: service_healthy
+
+  # Initialize Kafka Topics
+  init-topics:
+    image: redpandadata/redpanda:latest
+    container_name: init-topics
+    profiles: ["kafka"]
+    entrypoint: /bin/sh
+    command: |
+      -c "
+      echo 'Waiting for Redpanda...'
+      sleep 5
+      rpk topic create task-events --partitions 3 --brokers redpanda:9092 || true
+      rpk topic create reminders --partitions 1 --brokers redpanda:9092 || true
+      rpk topic create task-updates --partitions 3 --brokers redpanda:9092 || true
+      rpk topic create task-events-dlq --partitions 1 --brokers redpanda:9092 || true
+      echo 'Topics created!'
+      rpk topic list --brokers redpanda:9092
+      "
+    depends_on:
+      redpanda:
+        condition: service_healthy
+
+volumes:
+  redpanda-data:
+
+networks:
+  default:
+    name: todo-network
